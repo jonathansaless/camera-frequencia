@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Frequência com Selfie</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 560px;
+        margin: 32px auto;
+        padding: 20px;
+        line-height: 1.5;
+      }
+
+      h2 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+
+      h3 {
+        margin: 0 0 16px;
+        font-size: 18px;
+      }
+
+      .data-frequencia {
+        font-weight: normal;
+      }
+
+      .campo {
+        margin-top: 14px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: bold;
+      }
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 16px;
+      }
+
+      button {
+        width: 100%;
+        display: inline-block;
+        box-sizing: border-box;
+        margin-top: 20px;
+        padding: 14px 12px;
+        border: none;
+        border-radius: 8px;
+        text-align: center;
+        font-size: 16px;
+        cursor: pointer;
+        background: #1a73e8;
+        color: #fff;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      button.secundario {
+        background: #5f6368;
+      }
+
+      button:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+
+      .box {
+        margin-top: 16px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #f2f2f2;
+      }
+
+      .erro { color: #b00020; }
+      .ok { color: #0a6b2d; }
+      .small { font-size: 12px; color: #666; }
+
+      #camera,
+      #previewSelfie {
+        display: none;
+        width: 100%;
+        margin-top: 10px;
+        border-radius: 8px;
+        background: #000;
+      }
+
+      #canvasSelfie {
+        display: none;
+      }
+
+      .aviso-selfie {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>UC: Usos e pressões em Sistemas Sociológicos Marinhos (Vespertino)</h2>
+    <h3>Frequência <span id="dataHoje" class="data-frequencia"></span></h3>
+
+    <p>
+      Informe seu nome e RA. Depois, tire uma selfie na hora pela câmera do navegador.
+    </p>
+
+    <div class="campo">
+      <label for="nome">Nome completo</label>
+      <input type="text" id="nome" placeholder="Digite seu nome completo" autocomplete="name">
+    </div>
+
+    <div class="campo">
+      <label for="ra">RA</label>
+      <input type="text" id="ra" placeholder="Digite seu RA" inputmode="numeric" autocomplete="off">
+    </div>
+
+    <div class="campo">
+      <label>Selfie obrigatória</label>
+
+      <video id="camera" autoplay playsinline muted></video>
+      <canvas id="canvasSelfie"></canvas>
+
+      <img id="previewSelfie" alt="Prévia da selfie">
+
+      <button id="btnAbrirCamera" type="button">Abrir câmera para selfie</button>
+      <button id="btnTirarFoto" type="button" style="display:none;">Tirar foto</button>
+      <button id="btnRefazerFoto" type="button" class="secundario" style="display:none;">Refazer selfie</button>
+
+      <p class="small aviso-selfie">
+        A selfie deve ser tirada na hora. Esta página não permite envio de imagem da galeria.
+      </p>
+    </div>
+
+    <button id="btnContinuar" type="button">Continuar para o formulário</button>
+
+    <div id="status" class="box small">
+      O navegador pedirá permissão de câmera e localização.
+    </div>
+
+    <script>
+      // Cole aqui a URL /exec da implantação do seu Google Apps Script.
+      // Exemplo: https://script.google.com/macros/s/AKfycb.../exec
+      const APPS_SCRIPT_POST_URL = 'COLE_AQUI_A_URL_EXEC_DO_APPS_SCRIPT';
+
+      const btn = document.getElementById('btnContinuar');
+      const btnAbrirCamera = document.getElementById('btnAbrirCamera');
+      const btnTirarFoto = document.getElementById('btnTirarFoto');
+      const btnRefazerFoto = document.getElementById('btnRefazerFoto');
+
+      let streamCamera = null;
+      let selfieBase64 = '';
+
+      btn.addEventListener('click', continuar);
+      btnAbrirCamera.addEventListener('click', abrirCamera);
+      btnTirarFoto.addEventListener('click', tirarFoto);
+      btnRefazerFoto.addEventListener('click', refazerFoto);
+
+      function setStatus(msg, tipo) {
+        const el = document.getElementById('status');
+        el.textContent = msg;
+        el.className = 'box ' + (tipo || '') + ' small';
+      }
+
+      function preencherDataHoje() {
+        const dataFormatada = new Intl.DateTimeFormat('pt-BR', {
+          timeZone: 'America/Belem',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        }).format(new Date());
+
+        document.getElementById('dataHoje').textContent = '- ' + dataFormatada;
+      }
+
+      function isMobileDevice() {
+        const ua = navigator.userAgent || '';
+        const mobileByUa =
+          /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+
+        const mobileByPointer =
+          window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+        return mobileByUa || mobileByPointer;
+      }
+
+      async function abrirCamera() {
+        const nome = document.getElementById('nome').value.trim();
+        const ra = document.getElementById('ra').value.trim();
+
+        if (!nome) {
+          setStatus('Informe o nome completo antes de abrir a câmera.', 'erro');
+          return;
+        }
+
+        if (!ra) {
+          setStatus('Informe o RA antes de abrir a câmera.', 'erro');
+          return;
+        }
+
+        if (!window.isSecureContext) {
+          setStatus('A câmera só funciona em página HTTPS. Hospede esta página em GitHub Pages, Firebase Hosting ou Netlify.', 'erro');
+          return;
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setStatus('Este navegador não permite abrir a câmera diretamente. Tente usar o Google Chrome atualizado.', 'erro');
+          return;
+        }
+
+        try {
+          pararCamera();
+
+          selfieBase64 = '';
+
+          const video = document.getElementById('camera');
+          const preview = document.getElementById('previewSelfie');
+
+          preview.style.display = 'none';
+          video.style.display = 'block';
+
+          btnAbrirCamera.disabled = true;
+          btnAbrirCamera.textContent = 'Abrindo câmera...';
+
+          streamCamera = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: 'user' },
+              width: { ideal: 640 },
+              height: { ideal: 480 }
+            },
+            audio: false
+          });
+
+          video.srcObject = streamCamera;
+
+          await esperarVideoCarregar(video);
+          await video.play();
+
+          btnAbrirCamera.style.display = 'none';
+          btnAbrirCamera.disabled = false;
+          btnAbrirCamera.textContent = 'Abrir câmera para selfie';
+
+          btnTirarFoto.style.display = 'inline-block';
+          btnRefazerFoto.style.display = 'none';
+
+          setStatus('Câmera aberta. Centralize o rosto e clique em "Tirar foto".', '');
+        } catch (e) {
+          pararCamera();
+
+          btnAbrirCamera.disabled = false;
+          btnAbrirCamera.textContent = 'Abrir câmera para selfie';
+
+          document.getElementById('camera').style.display = 'none';
+
+          setStatus('Não foi possível acessar a câmera: ' + traduzirErroCamera(e), 'erro');
+        }
+      }
+
+      function esperarVideoCarregar(video) {
+        return new Promise(function(resolve, reject) {
+          if (video.readyState >= 2 && video.videoWidth > 0) {
+            resolve();
+            return;
+          }
+
+          const timer = setTimeout(function() {
+            reject(new Error('Tempo esgotado ao carregar o vídeo da câmera.'));
+          }, 8000);
+
+          video.onloadedmetadata = function() {
+            clearTimeout(timer);
+            resolve();
+          };
+
+          video.onerror = function() {
+            clearTimeout(timer);
+            reject(new Error('Erro ao carregar o vídeo da câmera.'));
+          };
+        });
+      }
+
+      function traduzirErroCamera(e) {
+        const nome = e && e.name ? e.name : '';
+        const msg = e && e.message ? e.message : '';
+
+        if (nome === 'NotAllowedError' || nome === 'PermissionDeniedError') {
+          return 'permissão negada. Autorize a câmera no navegador.';
+        }
+
+        if (nome === 'NotFoundError' || nome === 'DevicesNotFoundError') {
+          return 'nenhuma câmera foi encontrada no dispositivo.';
+        }
+
+        if (nome === 'NotReadableError' || nome === 'TrackStartError') {
+          return 'a câmera está sendo usada por outro aplicativo ou o navegador não conseguiu iniciar a câmera.';
+        }
+
+        if (nome === 'OverconstrainedError' || nome === 'ConstraintNotSatisfiedError') {
+          return 'a câmera não atende às configurações solicitadas.';
+        }
+
+        if (nome === 'SecurityError') {
+          return 'o navegador bloqueou a câmera por segurança.';
+        }
+
+        if (msg) {
+          return msg;
+        }
+
+        return 'erro desconhecido ao abrir a câmera.';
+      }
+
+      function tirarFoto() {
+        const video = document.getElementById('camera');
+
+        if (!video.videoWidth || !video.videoHeight) {
+          setStatus('A câmera ainda não está pronta. Tente novamente em alguns segundos.', 'erro');
+          return;
+        }
+
+        gerarSelfieComMarcacao(video, video.videoWidth, video.videoHeight);
+
+        video.style.display = 'none';
+        pararCamera();
+
+        btnTirarFoto.style.display = 'none';
+        btnRefazerFoto.style.display = 'inline-block';
+        btnAbrirCamera.style.display = 'none';
+
+        setStatus('Selfie registrada. Agora você pode continuar para o formulário.', 'ok');
+      }
+
+      function refazerFoto() {
+        selfieBase64 = '';
+        document.getElementById('previewSelfie').style.display = 'none';
+        document.getElementById('camera').style.display = 'none';
+
+        btnRefazerFoto.style.display = 'none';
+        btnTirarFoto.style.display = 'none';
+        btnAbrirCamera.style.display = 'inline-block';
+
+        abrirCamera();
+      }
+
+      function pararCamera() {
+        if (streamCamera) {
+          streamCamera.getTracks().forEach(function(track) {
+            track.stop();
+          });
+          streamCamera = null;
+        }
+      }
+
+      function gerarSelfieComMarcacao(origem, larguraOriginal, alturaOriginal) {
+        const canvas = document.getElementById('canvasSelfie');
+        const preview = document.getElementById('previewSelfie');
+        const maxLargura = 640;
+
+        let largura = larguraOriginal;
+        let altura = alturaOriginal;
+
+        if (largura > maxLargura) {
+          const escala = maxLargura / largura;
+          largura = Math.round(largura * escala);
+          altura = Math.round(altura * escala);
+        }
+
+        canvas.width = largura;
+        canvas.height = altura;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(origem, 0, 0, largura, altura);
+
+        const nome = document.getElementById('nome').value.trim();
+        const ra = document.getElementById('ra').value.trim();
+
+        const agora = new Date().toLocaleString('pt-BR', {
+          timeZone: 'America/Belem'
+        });
+
+        const faixaAltura = Math.max(72, Math.round(altura * 0.15));
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(0, altura - faixaAltura, largura, faixaAltura);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = Math.max(14, Math.round(largura * 0.028)) + 'px Arial';
+
+        ctx.fillText('Frequência - ' + agora, 12, altura - faixaAltura + 28);
+        ctx.fillText((nome || 'Sem nome') + ' | RA: ' + (ra || 'Sem RA'), 12, altura - faixaAltura + 56);
+
+        selfieBase64 = canvas.toDataURL('image/jpeg', 0.82);
+
+        preview.src = selfieBase64;
+        preview.style.display = 'block';
+      }
+
+      async function fetchComTimeout(url, timeoutMs) {
+        const controller = new AbortController();
+        const timer = setTimeout(function() {
+          controller.abort();
+        }, timeoutMs);
+
+        try {
+          const resp = await fetch(url, {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal
+          });
+
+          if (!resp.ok) return null;
+          return await resp.json();
+        } catch (e) {
+          return null;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      async function obterIpLocalBestEffort() {
+        return {
+          ipLocal: '',
+          ipLocalStatus: 'Não coletado na versão externa'
+        };
+      }
+
+      function detectarVersaoSistemaOperacional(ua) {
+        ua = String(ua || '');
+
+        if (/Windows NT 10\.0/i.test(ua)) return 'Windows 10/11';
+        if (/Windows NT 6\.3/i.test(ua)) return 'Windows 8.1';
+        if (/Windows NT 6\.2/i.test(ua)) return 'Windows 8';
+        if (/Windows NT 6\.1/i.test(ua)) return 'Windows 7';
+
+        if (/Android/i.test(ua)) {
+          const m = ua.match(/Android\s+([\d.]+)/i);
+          return m ? 'Android ' + m[1] : '';
+        }
+
+        if (/iPhone|iPad|iPod/i.test(ua)) {
+          const m = ua.match(/OS\s([\d_]+)/i);
+          return m ? 'iOS/iPadOS ' + m[1].replace(/_/g, '.') : '';
+        }
+
+        if (/Mac OS X/i.test(ua)) {
+          const m = ua.match(/Mac OS X\s([\d_]+)/i);
+          return m ? 'macOS ' + m[1].replace(/_/g, '.') : '';
+        }
+
+        return '';
+      }
+
+      function detectarNavegador(ua) {
+        ua = String(ua || '');
+
+        if (/Edg\//i.test(ua)) return 'Microsoft Edge';
+        if (/OPR\//i.test(ua)) return 'Opera';
+        if (/Chrome\//i.test(ua) && !/Chromium/i.test(ua)) return 'Google Chrome/Chromium';
+        if (/Firefox\//i.test(ua)) return 'Firefox';
+        if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) return 'Safari';
+
+        return 'Não identificado';
+      }
+
+      function detectarVersaoNavegador(ua) {
+        ua = String(ua || '');
+        const m = ua.match(/(?:Edg|OPR|Chrome|Firefox|Version)\/([\d.]+)/i);
+        return m ? m[1] : '';
+      }
+
+      function detectarModeloPorUserAgent(ua) {
+        ua = String(ua || '');
+
+        if (/Android/i.test(ua)) {
+          const m = ua.match(/Android\s+[\d.]+;\s*([^;)]+?)(?:\s+Build|;|\))/i);
+          if (m && m[1]) return m[1].trim();
+        }
+
+        if (/iPhone/i.test(ua)) return 'iPhone';
+        if (/iPad/i.test(ua)) return 'iPad';
+        if (/Windows/i.test(ua)) return 'Computador/Notebook Windows';
+        if (/Macintosh/i.test(ua)) return 'Mac';
+        if (/Linux/i.test(ua)) return 'Computador Linux';
+
+        return '';
+      }
+
+      async function obterInfoDispositivo() {
+        const ua = navigator.userAgent || '';
+
+        return {
+          versaoSistemaOperacional: detectarVersaoSistemaOperacional(ua),
+          modeloDispositivo: detectarModeloPorUserAgent(ua) || 'Não informado pelo navegador',
+          tipoDispositivo: isMobileDevice() ? 'Celular/Tablet' : 'Computador/Notebook',
+          navegador: detectarNavegador(ua),
+          versaoNavegador: detectarVersaoNavegador(ua),
+          nucleosLogicos: navigator.hardwareConcurrency || ''
+        };
+      }
+
+      async function obterIpPublico() {
+        const servicos = [
+          'https://api.ipify.org?format=json',
+          'https://api64.ipify.org?format=json',
+          'https://ipapi.co/json/'
+        ];
+
+        for (const url of servicos) {
+          const data = await fetchComTimeout(url, 8000);
+          const ip = data && data.ip ? String(data.ip).trim() : '';
+          if (ip) return ip;
+        }
+
+        return '';
+      }
+
+      async function continuar() {
+        const nome = document.getElementById('nome').value.trim();
+        const ra = document.getElementById('ra').value.trim();
+
+        if (!APPS_SCRIPT_POST_URL || APPS_SCRIPT_POST_URL === 'COLE_AQUI_A_URL_EXEC_DO_APPS_SCRIPT') {
+          setStatus('Configure a variável APPS_SCRIPT_POST_URL no arquivo da câmera.', 'erro');
+          return;
+        }
+
+        if (!nome) {
+          setStatus('Informe o nome completo.', 'erro');
+          return;
+        }
+
+        if (!ra) {
+          setStatus('Informe o RA.', 'erro');
+          return;
+        }
+
+        if (!selfieBase64) {
+          setStatus('Tire a selfie antes de continuar.', 'erro');
+          return;
+        }
+
+        if (!navigator.geolocation) {
+          setStatus('Seu navegador não suporta geolocalização.', 'erro');
+          return;
+        }
+
+        btn.disabled = true;
+        btnAbrirCamera.disabled = true;
+        btnTirarFoto.disabled = true;
+        btnRefazerFoto.disabled = true;
+
+        setStatus('Coletando localização...', '');
+
+        const ipPublicoPromise = obterIpPublico();
+        const ipLocalPromise = obterIpLocalBestEffort();
+        const infoDispositivoPromise = obterInfoDispositivo();
+
+        navigator.geolocation.getCurrentPosition(
+          async function(position) {
+            let ipPublico = '';
+            let ipLocalInfo = { ipLocal: '', ipLocalStatus: '' };
+            let infoDispositivo = {};
+
+            try {
+              ipPublico = await ipPublicoPromise;
+            } catch (e) {}
+
+            try {
+              ipLocalInfo = await ipLocalPromise;
+            } catch (e) {}
+
+            try {
+              infoDispositivo = await infoDispositivoPromise;
+            } catch (e) {}
+
+            const dados = {
+              nome: nome,
+              ra: ra,
+              selfieBase64: selfieBase64,
+              ipPublico: ipPublico,
+              ipLocal: ipLocalInfo.ipLocal || '',
+              ipLocalStatus: ipLocalInfo.ipLocalStatus || '',
+              versaoSistemaOperacional: infoDispositivo.versaoSistemaOperacional || '',
+              modeloDispositivo: infoDispositivo.modeloDispositivo || '',
+              tipoDispositivo: infoDispositivo.tipoDispositivo || '',
+              navegador: infoDispositivo.navegador || '',
+              versaoNavegador: infoDispositivo.versaoNavegador || '',
+              nucleosLogicos: infoDispositivo.nucleosLogicos || '',
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+              userAgent: navigator.userAgent || '',
+              language: navigator.language || '',
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+            };
+
+            setStatus('Enviando dados, salvando selfie e preparando formulário...', '');
+
+            enviarPorFormularioPost(dados);
+          },
+          function(error) {
+            let msg = 'Não foi possível obter a localização.';
+            if (error && error.code === 1) msg = 'Permissão de localização negada.';
+            if (error && error.code === 2) msg = 'Localização indisponível.';
+            if (error && error.code === 3) msg = 'Tempo esgotado para obter a localização.';
+            setStatus(msg, 'erro');
+            liberarBotoes();
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          }
+        );
+      }
+
+      function enviarPorFormularioPost(dados) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = APPS_SCRIPT_POST_URL;
+        form.style.display = 'none';
+
+        Object.keys(dados).forEach(function(chave) {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = chave;
+          input.value = dados[chave] == null ? '' : String(dados[chave]);
+          form.appendChild(input);
+        });
+
+        document.body.appendChild(form);
+        form.submit();
+      }
+
+      function liberarBotoes() {
+        btn.disabled = false;
+        btnAbrirCamera.disabled = false;
+        btnTirarFoto.disabled = false;
+        btnRefazerFoto.disabled = false;
+      }
+
+      preencherDataHoje();
+    </script>
+  </body>
+</html>
